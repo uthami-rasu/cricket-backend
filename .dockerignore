@@ -1,0 +1,65 @@
+#specific to this project only starts
+# Ignore these folders
+client
+db_dump
+deploy-local-scripts
+doc-deploy-details
+k8s
+k8s-local
+node_modules
+other_docs
+
+# Ignore specific files
+.env
+.env.sample
+msaccess-save.txt
+Dockerfile-multi
+Dockerfile1
+README.md
+Makefile
+#specific to this project only ends
+
+# Node dependencies
+node_modules
+npm-debug.log
+yarn-debug.log
+yarn-error.log
+
+# Logs
+logs
+*.log
+*.out
+*.err
+
+# Runtime files
+pids
+*.pid
+*.seed
+*.pid.lock
+
+# Coverage / Testing
+coverage
+.nyc_output
+#.env.test
+
+
+
+# OS & IDE files
+.DS_Store
+*.swp
+*.swo
+*.bak
+*.tmp
+Thumbs.db
+.vscode
+.idea
+
+# Docker-specific
+docker-compose.override.yml
+.dockerignore
+
+# Build artifacts
+dist
+build
+.tmp
+.cache

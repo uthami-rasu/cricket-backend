@@ -1,0 +1,176 @@
+stages:
+  - build
+  - update-manifest
+  - deploy-app
+  - deploy-argocd
+  - flip-first-deploy
+
+# -------------------------------
+# Build and push Docker image
+# -------------------------------
+build-push:
+  stage: build
+  tags:
+    - ar-1
+  image: docker:stable
+  before_script:
+    - echo "Password length - ${#REGISTRY_PASSWORD}"
+    - echo $REGISTRY_PASSWORD | docker login $REGISTRY_NAME -u $REGISTRY_USER --password-stdin
+    - export IMAGE_TAG=$(echo "$CI_COMMIT_SHORT_SHA" | tr '[:upper:]' '[:lower:]')
+    - export REGISTRY_IMAGE_PATH=$(echo "${REGISTRY_IMAGES_ROOT}/${CI_PROJECT_NAME}" | tr '[:upper:]' '[:lower:]')
+    - export APP_IMAGE_NAME=${REGISTRY_IMAGE_PATH}:${IMAGE_TAG}
+    - export LATEST_IMAGE_NAME=${REGISTRY_IMAGE_PATH}:latest
+  script:
+    - echo "Building image $APP_IMAGE_NAME"
+    - docker build -t $APP_IMAGE_NAME .
+    - docker push $APP_IMAGE_NAME
+  #   - echo "APP_IMAGE_NAME=$APP_IMAGE_NAME" > $CI_PROJECT_DIR/vars.env
+  # artifacts:
+  #   reports:
+  #     dotenv: $CI_PROJECT_DIR/vars.env
+  when: manual
+
+# -------------------------------
+# Update deployment.yaml with new image
+# -------------------------------
+update-manifest:
+  stage: update-manifest
+  needs: ["build-push"]
+  tags:
+    - ar-1
+  image: docker:git
+  # variables:
+  # PRJ_URL: https://gitlab-ci-token:$CI_JOB_TOKEN@gitlab.arffy.com/janakiraman_arffy/$CI_PROJECT_NAME.git
+  # PRJ_URL: https://gitlab-ci-token:$CI_JOB_TOKEN@gitlab.arffy.com/$CI_PROJECT_PATH.git
+
+  before_script:
+    - export PRJ_URL="https://oauth2:${PRJ_PAT}@${ARFFY_GITLAB_HOME}/${CI_PROJECT_PATH}.git"
+    - export K8S_MANIFEST_FULL_PATH=$CI_PROJECT_DIR/$K8S_MANIFEST_PATH
+    - export IMAGE_TAG=$(echo "$CI_COMMIT_SHORT_SHA" | tr '[:upper:]' '[:lower:]')
+    - export REGISTRY_IMAGE_PATH=$(echo "${REGISTRY_IMAGES_ROOT}/${CI_PROJECT_NAME}" | tr '[:upper:]' '[:lower:]')
+    - export APP_IMAGE_NAME=${REGISTRY_IMAGE_PATH}:${IMAGE_TAG}
+    - export LATEST_IMAGE_NAME=${REGISTRY_IMAGE_PATH}:latest
+    # Configure git identity for commit
+    - git config user.email $AUTHOR_EMAIL
+    - git config user.name $AUTHOR_NAME
+  script:
+    # Update deployment.yaml image line
+    - sed -i'' "s|\(image:\s*\).*|\1$APP_IMAGE_NAME|" "${K8S_MANIFEST_FULL_PATH}/${K8S_MANIFEST_DEPLOY}"
+    # Stage and commit changes
+    - git add "${K8S_MANIFEST_FULL_PATH}/${K8S_MANIFEST_DEPLOY}"
+    # Commit & push change 'skip ci' is MUST. to avoid a new pipeline loop.
+    # We can use `-o ci.skip`, but AFAIK it doesn't work for Merge Request pipelines,
+    # while having it inside the commit message works there as well
+    - git commit -m "Update deployment image to $APP_IMAGE_NAME [skip ci]" || echo "No changes to commit"
+    - git push --push-option="ci.skip" $PRJ_URL HEAD:$CI_COMMIT_REF_NAME
+    # # Set or reset the remote safely
+    # - git remote remove ci_remote || true
+    # - git remote add ci_remote "$PRJ_URL"
+    # # Push to the same branch
+    # - git push ci_remote HEAD:$CI_COMMIT_REF_NAME
+  artifacts:
+    paths:
+      - "${K8S_MANIFEST_FULL_PATH}/${K8S_MANIFEST_DEPLOY}"
+  when: manual
+
+.curl-install: &curl-install
+  before_script:
+    - apk add --no-cache curl
+
+.deploy-with-kubectl: &kubectl-install
+  before_script:
+    - apk add --no-cache curl # Required for curl to work
+    - curl -LO https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl
+    - chmod +x ./kubectl
+    - mv ./kubectl /usr/local/bin/kubectl
+
+# -------------------------------
+# Deploy the application - Apply all manifests for the first time only, next onward Argocd will take care...
+# -------------------------------
+# to use the same piece of code in multiple jobs...
+deploy-app:
+  stage: deploy-app
+  # this is for execution order. so execute this job after update-manifest job
+  needs: ["update-manifest"]
+  # this is for getting artifacts from update-manifest job...
+  dependencies:
+    - update-manifest
+  tags:
+    - ar-1
+  image: docker:git # Or another small base image like python:3.10-slim
+  # <<: *kubectl-install
+  before_script:
+    - apk add --no-cache curl # Required for curl to work
+    - curl -LO https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl
+    - chmod +x ./kubectl
+    - mv ./kubectl /usr/local/bin/kubectl
+    - export K8S_MANIFEST_FULL_PATH=${CI_PROJECT_DIR}/${K8S_MANIFEST_PATH}
+    - export K8S_UPLOAD_PVC_FULL_PATH=${CI_PROJECT_DIR}/${K8S_UPLOAD_PVC_PATH}
+    - git fetch origin $CI_COMMIT_REF_NAME
+    - git reset --hard origin/$CI_COMMIT_REF_NAME
+  script:
+    - echo "Applying Application's manifests..."
+    - echo "${KUBECONFIG_CONTENT}" | base64 -d > kubeconfig.yaml
+    # Replace insecure-skip-tls-verify: true with false in that file
+    - "sed -i'' 's|insecure-skip-tls-verify: true|insecure-skip-tls-verify: false|' kubeconfig.yaml"
+    - export KUBECONFIG=$(pwd)/kubeconfig.yaml
+    - kubectl apply -f ${K8S_UPLOAD_PVC_FULL_PATH}
+    - kubectl apply -f ${K8S_MANIFEST_FULL_PATH}/${K8S_MANIFEST_DEPLOY}
+    - kubectl apply -f ${K8S_MANIFEST_FULL_PATH}/${K8S_MANIFEST_SERVICE}
+    - kubectl apply -f ${K8S_MANIFEST_FULL_PATH}/${K8S_MANIFEST_INGRESS}
+  # rules:
+  #   - if: '$FIRST_TIME_DEPLOY == "true"'
+  when: manual
+
+# -------------------------------
+# Deploy ArgoCD Application (only for first time for this project)
+# -------------------------------
+deploy-argocd:
+  stage: deploy-argocd
+  needs: ["deploy-app"]
+  tags:
+    - ar-1
+  image: alpine:latest
+  # <<: *kubectl-install
+  before_script:
+    - apk add --no-cache curl # Required for curl to work
+    - curl -LO https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl
+    - chmod +x ./kubectl
+    - mv ./kubectl /usr/local/bin/kubectl
+    - export K8S_ARGOCD_FULL_PATH=${CI_PROJECT_DIR}/${K8S_ARGOCD_PATH}
+  script:
+    - echo "Applying ArgoCD Application for the first time..."
+    - echo "${KUBECONFIG_CONTENT}" | base64 -d > kubeconfig.yaml
+    # Replace insecure-skip-tls-verify: true with false in that file
+    - "sed -i'' 's|insecure-skip-tls-verify: true|insecure-skip-tls-verify: false|' kubeconfig.yaml"
+    - export KUBECONFIG=$(pwd)/kubeconfig.yaml
+    - echo ${K8S_ARGOCD_FULL_PATH}
+    - kubectl apply -f $K8S_ARGOCD_FULL_PATH -n $K8S_ARGOCD_NAMESPACE
+  # rules:
+  #   - if: '$FIRST_TIME_DEPLOY == "true"'
+  when: manual
+# -------------------------------
+# flip the $FIRST_TIME_DEPLOY variable if it is true. so that deploy-argo job will run only for first time only.
+# -------------------------------
+
+flip-first-deploy:
+  stage: flip-first-deploy
+  needs: ["deploy-argocd"]
+  tags:
+    - ar-1
+  image: alpine:latest
+  # <<: *curl-install
+  before_script:
+    - export GITLAB_PRJ_VAR_SET_URL=https://${ARFFY_GITLAB_HOME}/api/v4/projects/$CI_PROJECT_ID/variables/FIRST_TIME_DEPLOY
+    - apk add --no-cache curl # Required for curl to work
+  script:
+    - |
+      echo "Flipping FIRST_TIME_DEPLOY to false for future pipelines..."
+      curl --request PUT \
+           --header "PRIVATE-TOKEN: $PRJ_PAT" \
+           --header "Content-Type: application/json" \
+           --data '{"value":"false"}' \
+           "$GITLAB_PRJ_VAR_SET_URL"
+  # rules:
+  #   - if: '$FIRST_TIME_DEPLOY == "true"'
+  when: manual
