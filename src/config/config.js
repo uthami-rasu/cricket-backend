@@ -23,6 +23,7 @@ module.exports = {
     password: process.env.DB_PASS || "",
     database: process.env.DB_NAME || "boiler_plate_express_rest",
     host: process.env.DB_HOST || "124.40.245.182",
+    port: Number(process.env.DB_PORT) || 3306,
     dialect: "mysql",
     timezone: "+00:00", // Force Sequelize to use UTC
     dialectOptions: {

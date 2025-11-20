@@ -57,8 +57,14 @@ module.exports = {
 
     // Roles
     const roles = [
-      { name: "Admin", desc: "Admin role" },
-      { name: "Client", desc: "Client role" },
+      {
+        name: "Super Admin",
+        desc: "Full access to manage cricket platform content",
+      },
+      {
+        name: "Editor",
+        desc: "Creates cricket updates requiring approval",
+      },
     ];
 
     for (const r of roles) {
@@ -81,10 +87,80 @@ module.exports = {
     }
 
     // User roles
+    // Permissions aligned with cricket workflow
+    const permissions = [
+      { name: "manage_scores", desc: "Upload and edit match scores" },
+      { name: "manage_posts", desc: "Create and edit posts/photos/updates" },
+      { name: "approve_content", desc: "Approve or reject submitted content" },
+    ];
+
+    for (const p of permissions) {
+      await queryInterface
+        .rawSelect("permissions", { where: { name: p.name } }, ["id"])
+        .then(async (exists) => {
+          if (!exists) {
+            await queryInterface.bulkInsert("permissions", [
+              {
+                name: p.name,
+                desc: p.desc,
+                created_at: new Date(),
+                modified_at: null,
+                created_by: 1,
+                modified_by: null,
+              },
+            ]);
+          }
+        });
+    }
+
+    const rolePermissions = [
+      { role: "Super Admin", permission: "manage_scores" },
+      { role: "Super Admin", permission: "manage_posts" },
+      { role: "Super Admin", permission: "approve_content" },
+      { role: "Editor", permission: "manage_scores" },
+      { role: "Editor", permission: "manage_posts" },
+    ];
+
+    for (const rp of rolePermissions) {
+      const roleId = await queryInterface.rawSelect(
+        "roles",
+        { where: { name: rp.role } },
+        ["id"]
+      );
+      const permissionId = await queryInterface.rawSelect(
+        "permissions",
+        { where: { name: rp.permission } },
+        ["id"]
+      );
+
+      if (!roleId || !permissionId) {
+        continue;
+      }
+
+      const exists = await queryInterface.rawSelect(
+        "role_permissions",
+        { where: { role_id: roleId, permission_id: permissionId } },
+        ["id"]
+      );
+
+      if (!exists) {
+        await queryInterface.bulkInsert("role_permissions", [
+          {
+            role_id: roleId,
+            permission_id: permissionId,
+            created_at: new Date(),
+            modified_at: null,
+            created_by: 1,
+            modified_by: null,
+          },
+        ]);
+      }
+    }
+
     const userRoles = [
-      { username: "admin", role: "Admin" },
-      { username: "gsm", role: "Admin" },
-      { username: "user1", role: "Client" },
+      { username: "admin", role: "Super Admin" },
+      { username: "gsm", role: "Super Admin" },
+      { username: "user1", role: "Editor" },
     ];
 
     for (const ur of userRoles) {

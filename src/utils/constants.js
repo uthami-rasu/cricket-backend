@@ -1,4 +1,6 @@
 const path = require("path");
+const { createEnum } = require("./utils");
+
 class Constant {
   API_DOCS_FILE = path.join(__dirname, "../routes/", "API_DOCS.md");
   // date and time related starts
@@ -61,6 +63,60 @@ class Constant {
     OPERATOR: "operator",
     CLIENT: "client",
   });
+
+  player_designations = createEnum({
+    CAPTAIN: "captain",
+    VICE_CAPTAIN: "vice_captain",
+    WICKET_KEEPER: "wicket_keeper",
+    REGULAR_PLAYER: "regular_player",
+  });
+
+  player_batting_styles = createEnum({
+    RIGHT_HANDED: "right_handed",
+    LEFT_HANDED: "left_handed",
+  });
+
+  player_bowling_styles = createEnum({
+    RIGHT_ARM_FAST: "right_arm_fast",
+    LEFT_ARM_FAST: "left_arm_fast",
+    RIGHT_ARM_MEDIUM: "right_arm_medium",
+    LEFT_ARM_MEDIUM: "left_arm_medium",
+    RIGHT_ARM_OFF_SPIN: "right_arm_off_spin",
+    LEFT_ARM_OFF_SPIN: "left_arm_off_spin",
+    RIGHT_ARM_LEG_SPIN: "right_arm_leg_spin",
+    LEFT_ARM_LEG_SPIN: "left_arm_leg_spin",
+  });
+
+  player_bowling_types = createEnum({
+    FAST: "fast",
+    MEDIUM: "medium",
+    OFF_SPIN: "off_spin",
+    LEG_SPIN: "leg_spin",
+  });
+
+  player_positions = createEnum({
+    BATTING: "batting",
+    BOWLING: "bowling",
+    ALL_ROUNDER: "all_rounder",
+  });
+
+  match_status = createEnum({
+    UPCOMING: "upcoming",
+    SCHEDULED: "scheduled",
+    STARTED: "started",
+    DELAYED: "delayed",
+    STOPPED: "stopped",
+    LIVE: "live",
+    COMPLETED: "completed",
+    CANCELLED: "cancelled",
+  });
+
+  team_status = createEnum({
+    ACTIVE: "active",
+    INACTIVE: "inactive",
+    SUSPENDED: "suspended",
+  });
+
   isClient = (user) =>
     user?.roles?.some(
       (r) => r.toLowerCase() === this.roles.CLIENT.toLowerCase()

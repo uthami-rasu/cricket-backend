@@ -382,6 +382,20 @@ class Util {
     }
     return null;
   };
+
+  createEnum = (entries) => {
+    const frozenEntries = Object.freeze({ ...entries });
+    const enumObject = { ...frozenEntries };
+
+    Object.defineProperty(enumObject, "values", {
+      enumerable: true,
+      get() {
+        return Object.freeze(Object.values(frozenEntries));
+      },
+    });
+
+    return Object.freeze(enumObject);
+  };
 }
 
 module.exports = new Util();
